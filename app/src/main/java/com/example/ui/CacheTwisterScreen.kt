@@ -112,11 +112,10 @@ fun CacheTwisterScreen(
         currentTab = TwisterDestination.TWISTER
     }
 
-    // Trigger pre-clean verification when launched from the home screen widget
+    // Widget taps navigate only. No scan or deletion confirmation is started here.
     LaunchedEffect(launchVerifyTrigger) {
         if (launchVerifyTrigger > 0) {
-            currentTab = TwisterDestination.TWISTER
-            viewModel.startPreCleanVerification()
+            currentTab = TwisterDestination.APPS
         }
     }
 
@@ -128,11 +127,13 @@ fun CacheTwisterScreen(
         }
     }
 
-    val safeStartActivity: (Intent) -> Unit = { intent ->
+    val safeStartActivity: (Intent) -> Boolean = { intent ->
         try {
             context.startActivity(intent)
+            true
         } catch (_: Exception) {
             viewModel.postStatusMessage("Unable to open Android Settings screen on this device.")
+            false
         }
     }
 
@@ -156,7 +157,7 @@ fun CacheTwisterScreen(
 
     val openAppStorageAction: (AppCacheEntry) -> Unit = { entry ->
         viewModel.prepareExternalAppStorageOpen(entry)
-        safeStartActivity(viewModel.createAppStorageIntent(entry.packageName))
+        if (!safeStartActivity(viewModel.createAppStorageIntent(entry.packageName))) viewModel.cancelExternalAppStorageOpen()
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -262,7 +263,6 @@ fun CacheTwisterScreen(
                             uiState = uiState,
                             onPinMiniWidgetClick = pinMiniWidgetAction,
                             onPinFullWidgetClick = pinFullWidgetAction,
-                            onToggleRequireVerify = { viewModel.setRequireVerifyBeforeWidgetClean(it) },
                             onToggleHaptic = { viewModel.setHapticEnabled(it) },
                             modifier = contentModifier
                         )
@@ -277,7 +277,7 @@ fun CacheTwisterScreen(
     if (uiState.phase == CleanPhase.CONFIRM_READY && report != null) {
         PreCleanVerificationSheet(
             report = report,
-            onConfirmTornado = { viewModel.confirmAndStartTornadoClean() },
+            onConfirmTornado = { viewModel.confirmAndStartTornadoClean(report) },
             onGrantUsageAccess = { safeStartActivity(viewModel.createUsageAccessIntent()) },
             onDismiss = { viewModel.dismissVerification() }
         )
@@ -357,7 +357,7 @@ private fun TwisterHomeTab(
             CleanPhase.COMPLETED -> if (uiState.sessionFreedBytes > 0L) {
                 formatBytes(uiState.sessionFreedBytes)
             } else {
-                "Verified"
+                "Review scope"
             }
             else -> if (uiState.hasUsageAccess && uiState.totalMeasuredCacheBytes > 0L) {
                 formatBytes(uiState.totalMeasuredCacheBytes)
@@ -368,7 +368,7 @@ private fun TwisterHomeTab(
         val centerSecondary = when (uiState.phase) {
             CleanPhase.VERIFYING -> "4-point safety check"
             CleanPhase.TORNADO_SWEEPING -> "Tornado sweeping"
-            CleanPhase.COMPLETED -> if (uiState.sessionFreedBytes > 0L) "Verified freed" else "Safe & checked"
+            CleanPhase.COMPLETED -> if (uiState.sessionFreedBytes > 0L) "Own cache freed" else "Sweep finished"
             else -> if (uiState.hasUsageAccess) "Measured app cache" else "Ready to verify"
         }
 
@@ -433,10 +433,10 @@ private fun TwisterHomeTab(
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = when (uiState.phase) {
-                    CleanPhase.VERIFYING -> "Verifying Safety Checks…"
+                    CleanPhase.VERIFYING -> "Reviewing cache scope…"
                     CleanPhase.TORNADO_SWEEPING -> "Tornado Cleaning…"
-                    CleanPhase.COMPLETED -> "Re-Verify & Sweep Again"
-                    else -> "Verify & Clean Cache"
+                    CleanPhase.COMPLETED -> "Review own-cache cleanup"
+                    else -> "Review own-cache cleanup"
                 },
                 style = MaterialTheme.typography.labelLarge
             )
@@ -444,7 +444,7 @@ private fun TwisterHomeTab(
 
         // Post-Tornado Guided Per-App Safe Storage Runner
         val nextApp = uiState.nextGuidedApp
-        AnimatedVisibility(visible = uiState.phase == CleanPhase.COMPLETED && nextApp != null) {
+        AnimatedVisibility(visible = uiState.phase != CleanPhase.TORNADO_SWEEPING && nextApp != null) {
             if (nextApp != null) {
                 Card(
                     colors = CardDefaults.cardColors(
@@ -467,13 +467,13 @@ private fun TwisterHomeTab(
                                 tint = MaterialTheme.colorScheme.secondary
                             )
                             Text(
-                                text = "Safe Guided App Sweep",
+                                text = "Saved app queue",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer
                             )
                         }
                         Text(
-                            text = "Android 15 protects each app's private cache. Tap below to open ${nextApp.appName}'s official Storage screen, tap Clear cache, and return here to auto-verify.",
+                            text = "Android protects each app’s private cache. Open ${nextApp.appName}'s App info, then tap Storage, tap Clear cache, and return here to refresh the measurement. Never tap Clear data.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.9f)
                         )
@@ -493,7 +493,7 @@ private fun TwisterHomeTab(
                                 )
                             ) {
                                 Text(
-                                    text = "Clean ${nextApp.appName}",
+                                    text = "Open next",
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -505,12 +505,12 @@ private fun TwisterHomeTab(
                                 )
                             }
                             OutlinedButton(
-                                onClick = onResetToIdle,
+                                onClick = onOpenAppsTab,
                                 modifier = Modifier
                                     .height(48.dp)
                                     .testTag("guided_done_button")
                             ) {
-                                Text("Done")
+                                Text("Queue")
                             }
                         }
                     }
@@ -564,7 +564,7 @@ private fun TwisterHomeTab(
                     }
                 }
                 Text(
-                    text = "Place the little 1×1 Mini Tornado button or the 2×2 control card directly on your home screen for one-tap sweeping.",
+                    text = "Place the little 1×1 Mini Tornado button or the 2×2 control card directly on your home screen to open the cache queue.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

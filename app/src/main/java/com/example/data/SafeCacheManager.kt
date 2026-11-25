@@ -67,20 +67,10 @@ class SafeCacheManager(private val context: Context) {
         return total
     }
 
-    fun clearOwnAppCacheSafely(): Long {
-        val before = measureOwnAppCacheBytes()
-        val dirs = buildList {
-            context.cacheDir?.let { add(it) }
-            context.codeCacheDir?.let { add(it) }
-            context.externalCacheDir?.let { add(it) }
-        }.distinctBy { it.absolutePath }
-
-        for (dir in dirs) {
-            deleteChildrenSafely(dir)
-        }
-        val after = measureOwnAppCacheBytes()
-        return (before - after).coerceAtLeast(0L)
-    }
+    internal fun clearOwnAppCacheSafely(): CacheSweepResult =
+        listOfNotNull(context.cacheDir, context.codeCacheDir, context.externalCacheDir)
+            .distinctBy { it.absolutePath }
+            .fold(CacheSweepResult(0, 0, 0)) { result, dir -> result + sweepCacheRoot(dir.toPath()) }
 
     fun scanAvailableApps(previouslyCleared: Set<String> = emptySet()): List<AppCacheEntry> {
         val pm = context.packageManager
@@ -133,8 +123,7 @@ class SafeCacheManager(private val context: Context) {
                 pkg
             }
             val isSystem = appInfo != null &&
-                ((appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0) &&
-                ((appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0)
+                (appInfo.flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0
 
             var cacheBytes = 0L
             var appBytes = 0L
@@ -171,7 +160,7 @@ class SafeCacheManager(private val context: Context) {
                     isSystemApp = isSystem,
                     isOwnApp = false,
                     cacheMeasured = measured,
-                    isSelectedForClean = !isSystem || cacheBytes > 1024L * 1024L,
+                    isSelectedForClean = !isSystem,
                     isClearedThisSession = previouslyCleared.contains(pkg) && (!measured || cacheBytes < 16_384L)
                 )
             )
@@ -205,14 +194,14 @@ class SafeCacheManager(private val context: Context) {
         val checks = listOf(
             SafetyCheckItem(
                 id = "scope_guard",
-                title = "Cache-Only Boundary Verified",
+                title = "Cache-only scope",
                 detail = "Targets disposable cache folders only. Logins, app databases, photos, and personal files are never touched.",
                 status = SafetyCheckStatus.PASSED
             ),
             SafetyCheckItem(
                 id = "sandbox_compliance",
-                title = "Android Sandbox & One UI Safe Mode",
-                detail = "Verified on $deviceLabel ($androidLabel). Clears own temp cache directly and routes other apps through Android's official Storage & Cache controls.",
+                title = "Other apps require manual action",
+                detail = "Opens App info for other apps. You decide whether to clear cache in Android Settings.",
                 status = SafetyCheckStatus.PASSED
             ),
             SafetyCheckItem(
@@ -221,14 +210,14 @@ class SafeCacheManager(private val context: Context) {
                 detail = if (usageGranted) {
                     "StorageStatsManager confirmed ${formatBytes(totalMeasuredCache)} of cache across ${apps.size} available apps."
                 } else {
-                    "Grant Usage Access in Settings to measure exact MB cache sizes per app and verify 0 B after each clean."
+                    "Grant Usage Access in Settings to measure cache sizes per app, when Android makes them available."
                 },
                 status = if (usageGranted) SafetyCheckStatus.PASSED else SafetyCheckStatus.ACTION_RECOMMENDED
             ),
             SafetyCheckItem(
                 id = "queue_integrity",
-                title = "App Queue Integrity Checked",
-                detail = "${selectedApps.size} of ${apps.size} available apps queued. Core system OS packages are protected from unintended disruption.",
+                title = "Apps selected for the queue",
+                detail = "${selectedApps.size} of ${apps.size} available apps queued. Samsung and other system apps are not selected by default.",
                 status = SafetyCheckStatus.PASSED
             )
         )
@@ -243,7 +232,7 @@ class SafeCacheManager(private val context: Context) {
             selectedAppCount = selectedApps.size,
             totalDiscoveredApps = apps.size,
             hasUsageAccess = usageGranted,
-            isReadyToSweep = selectedApps.isNotEmpty()
+            isReadyToSweep = selectedApps.any { it.isOwnApp }
         )
     }
 
@@ -277,27 +266,15 @@ class SafeCacheManager(private val context: Context) {
         }
     }
 
-    private fun directorySize(dir: File?): Long {
-        if (dir == null || !dir.exists()) return 0L
+    private fun directorySize(dir: File?, depth: Int = 0): Long {
+        if (depth > 64 || dir == null || !dir.exists() || java.nio.file.Files.isSymbolicLink(dir.toPath())) return 0L
         if (dir.isFile) return dir.length().coerceAtLeast(0L)
         var size = 0L
         dir.listFiles()?.forEach { child ->
-            size += if (child.isDirectory) directorySize(child) else child.length().coerceAtLeast(0L)
+            if (java.nio.file.Files.isSymbolicLink(child.toPath())) return@forEach
+            size += if (child.isDirectory) directorySize(child, depth + 1) else child.length().coerceAtLeast(0L)
         }
         return size
     }
 
-    private fun deleteChildrenSafely(dir: File?) {
-        if (dir == null || !dir.exists() || !dir.isDirectory) return
-        dir.listFiles()?.forEach { child ->
-            try {
-                if (child.isDirectory) {
-                    deleteChildrenSafely(child)
-                }
-                child.delete()
-            } catch (_: Exception) {
-                // Safely skip any OS-locked file
-            }
-        }
-    }
 }

@@ -12,7 +12,8 @@ data class AppCacheEntry(
     val isOwnApp: Boolean,
     val cacheMeasured: Boolean,
     val isSelectedForClean: Boolean = true,
-    val isClearedThisSession: Boolean = false
+    val isClearedThisSession: Boolean = false,
+    val externalStatus: ExternalCacheStatus? = null
 )
 
 enum class SafetyCheckStatus {
@@ -63,7 +64,6 @@ data class CleanSessionStats(
     val totalBytesFreedLifetime: Long = 0L,
     val lastSessionFreedBytes: Long = 0L,
     val lastVerifiedAppsCount: Int = 0,
-    val requireVerifyBeforeWidgetClean: Boolean = true,
     val hapticEnabled: Boolean = true
 )
 

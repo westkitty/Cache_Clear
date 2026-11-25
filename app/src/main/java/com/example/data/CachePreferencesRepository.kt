@@ -26,7 +26,6 @@ class CachePreferencesRepository(private val context: Context) {
             totalBytesFreedLifetime = prefs[KEY_LIFETIME_FREED] ?: 0L,
             lastSessionFreedBytes = prefs[KEY_LAST_SESSION_FREED] ?: 0L,
             lastVerifiedAppsCount = prefs[KEY_LAST_APPS_COUNT] ?: 0,
-            requireVerifyBeforeWidgetClean = prefs[KEY_REQUIRE_VERIFY] ?: true,
             hapticEnabled = prefs[KEY_HAPTIC_ENABLED] ?: true
         )
     }
@@ -62,13 +61,6 @@ class CachePreferencesRepository(private val context: Context) {
             .apply()
     }
 
-    suspend fun setRequireVerifyBeforeWidgetClean(enabled: Boolean) {
-        context.cacheTwisterDataStore.edit { prefs ->
-            prefs[KEY_REQUIRE_VERIFY] = enabled
-        }
-        widgetMirrorPrefs.edit().putBoolean(MIRROR_REQUIRE_VERIFY, enabled).apply()
-    }
-
     suspend fun setHapticEnabled(enabled: Boolean) {
         context.cacheTwisterDataStore.edit { prefs ->
             prefs[KEY_HAPTIC_ENABLED] = enabled
@@ -82,7 +74,6 @@ class CachePreferencesRepository(private val context: Context) {
             lastFreedBytes = widgetMirrorPrefs.getLong(MIRROR_LAST_FREED_BYTES, 0L),
             detectedCacheBytes = widgetMirrorPrefs.getLong(MIRROR_DETECTED_CACHE_BYTES, 0L),
             appsCount = widgetMirrorPrefs.getInt(MIRROR_APPS_COUNT, 0),
-            requireVerify = widgetMirrorPrefs.getBoolean(MIRROR_REQUIRE_VERIFY, true),
             hapticEnabled = widgetMirrorPrefs.getBoolean(MIRROR_HAPTIC_ENABLED, true)
         )
     }
@@ -92,7 +83,6 @@ class CachePreferencesRepository(private val context: Context) {
         val lastFreedBytes: Long,
         val detectedCacheBytes: Long,
         val appsCount: Int,
-        val requireVerify: Boolean,
         val hapticEnabled: Boolean
     )
 
@@ -102,14 +92,12 @@ class CachePreferencesRepository(private val context: Context) {
         private const val MIRROR_LAST_FREED_BYTES = "last_freed_bytes"
         private const val MIRROR_DETECTED_CACHE_BYTES = "detected_cache_bytes"
         private const val MIRROR_APPS_COUNT = "apps_count"
-        private const val MIRROR_REQUIRE_VERIFY = "require_verify"
         private const val MIRROR_HAPTIC_ENABLED = "haptic_enabled"
 
         private val KEY_LAST_CLEANED_MS = longPreferencesKey("last_cleaned_epoch_ms")
         private val KEY_LIFETIME_FREED = longPreferencesKey("lifetime_freed_bytes")
         private val KEY_LAST_SESSION_FREED = longPreferencesKey("last_session_freed_bytes")
         private val KEY_LAST_APPS_COUNT = intPreferencesKey("last_verified_apps_count")
-        private val KEY_REQUIRE_VERIFY = booleanPreferencesKey("require_verify_before_widget_clean")
         private val KEY_HAPTIC_ENABLED = booleanPreferencesKey("haptic_enabled")
     }
 }

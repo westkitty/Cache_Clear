@@ -88,7 +88,7 @@ fun PreCleanVerificationSheet(
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Pre-Clean Safety Verified",
+                        text = "Review own-cache cleanup",
                         style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -116,7 +116,7 @@ fun PreCleanVerificationSheet(
                 ) {
                     Column {
                         Text(
-                            text = "TARGETED QUEUE",
+                            text = "SELECTED FOR MANUAL QUEUE",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -175,7 +175,7 @@ fun PreCleanVerificationSheet(
                         .size(18.dp)
                 )
                 Text(
-                    text = "Safe Android 15 / One UI flow: Cache Twister clears its own cache directly during the tornado animation, then lines up each selected app's official Android Storage screen so your logins and personal files stay 100% protected.",
+                    text = "Confirming deletes only Cache Twister’s own internal cache, code cache, and app-specific external cache. Other apps are manual: App info → Storage → Clear cache. Never tap Clear data.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -185,6 +185,7 @@ fun PreCleanVerificationSheet(
 
             Button(
                 onClick = onConfirmTornado,
+                enabled = report.isReadyToSweep,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(54.dp)
@@ -201,7 +202,7 @@ fun PreCleanVerificationSheet(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Confirm & Start Tornado Clean",
+                    text = "Confirm: clear Twister cache",
                     style = MaterialTheme.typography.labelLarge
                 )
             }

@@ -19,7 +19,7 @@
     </queries>
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
@@ -43,12 +43,10 @@
         <!-- Compact Little 1x1 Mini-Tornado Home Screen Widget -->
         <receiver
             android:name=".widget.MiniTornadoWidgetProvider"
-            android:exported="true"
+            android:exported="false"
             android:label="@string/mini_widget_title">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.example.action.MINI_WIDGET_SWEEP" />
-                <action android:name="com.example.action.MINI_WIDGET_REFRESH" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
@@ -58,12 +56,10 @@
         <!-- Resizable 2x2 Cache Twister Home Screen Widget -->
         <receiver
             android:name=".widget.CacheTwisterWidgetProvider"
-            android:exported="true"
+            android:exported="false"
             android:label="@string/widget_title">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.example.action.WIDGET_TORNADO_SWEEP" />
-                <action android:name="com.example.action.WIDGET_REFRESH" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"

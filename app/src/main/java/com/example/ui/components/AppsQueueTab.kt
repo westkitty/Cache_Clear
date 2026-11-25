@@ -163,7 +163,8 @@ fun AppsQueueTab(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                val allSelected = uiState.apps.isNotEmpty() && uiState.selectedApps.size == uiState.apps.size
+                val selectable = uiState.apps.filterNot { it.isSystemApp }
+                val allSelected = selectable.isNotEmpty() && selectable.all { it.isSelectedForClean }
                 OutlinedButton(
                     onClick = { onSelectAll(!allSelected) },
                     modifier = Modifier
@@ -172,7 +173,7 @@ fun AppsQueueTab(
                         .testTag("toggle_select_all_button")
                 ) {
                     Text(
-                        text = if (allSelected) "Keep Own Only" else "Select All",
+                        text = if (allSelected) "Clear selection" else "Select non-system",
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -233,7 +234,7 @@ fun AppsQueueTab(
             }
         } else {
             items(
-                items = uiState.apps,
+                items = uiState.apps.sortedByDescending { it.isSelectedForClean },
                 key = { it.packageName }
             ) { app ->
                 AppCacheRowCard(
@@ -281,7 +282,7 @@ private fun AppCacheRowCard(
             Checkbox(
                 checked = entry.isSelectedForClean,
                 onCheckedChange = { onToggleSelect() },
-                enabled = !entry.isOwnApp,
+                enabled = true,
                 modifier = Modifier
                     .semantics { contentDescription = toggleCd }
                     .testTag("app_checkbox_${entry.packageName}")
@@ -303,7 +304,7 @@ private fun AppCacheRowCard(
                     if (entry.isClearedThisSession) {
                         Icon(
                             imageVector = Icons.Filled.CheckCircle,
-                            contentDescription = "Verified cleared",
+                            contentDescription = "Own cache empty",
                             tint = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.size(16.dp)
                         )
@@ -330,7 +331,7 @@ private fun AppCacheRowCard(
                         }
                     ) {
                         Text(
-                            text = if (entry.isClearedThisSession) "Verified clean" else cacheBadge,
+                            text = entry.externalStatus?.label ?: if (entry.isClearedThisSession) "Own cache empty" else cacheBadge,
                             style = MaterialTheme.typography.labelSmall,
                             color = if (entry.isClearedThisSession) {
                                 MaterialTheme.colorScheme.onSecondaryContainer

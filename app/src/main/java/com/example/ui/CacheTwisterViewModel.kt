@@ -16,6 +16,11 @@ import com.example.data.DeviceStorageSummary
 import com.example.data.SafeCacheManager
 import com.example.data.VerificationReport
 import com.example.data.formatBytes
+import com.example.data.CacheSelectionStore
+import com.example.data.CacheSweepResult
+import com.example.data.ConfirmationGate
+import com.example.data.ExternalCacheStatus
+import com.example.data.externalCacheStatus
 import com.example.widget.CacheTwisterWidgetProvider
 import com.example.widget.MiniTornadoWidgetProvider
 import kotlinx.coroutines.Dispatchers
@@ -68,12 +73,10 @@ data class CacheTwisterUiState(
         get() = topCacheFootprintApps.maxOfOrNull { it.cacheBytes } ?: 0L
 
     val nextGuidedApp: AppCacheEntry?
-        get() = apps.firstOrNull { entry ->
-            entry.isSelectedForClean &&
-                !entry.isOwnApp &&
-                !entry.isClearedThisSession &&
-                (!entry.cacheMeasured || entry.cacheBytes > 16_384L)
-        }
+        get() = apps.filter { entry ->
+            entry.isSelectedForClean && !entry.isOwnApp &&
+                (!entry.cacheMeasured || entry.cacheBytes > 0L)
+        }.minByOrNull { if (it.externalStatus == null) 0 else 1 }
 }
 
 class CacheTwisterViewModel(application: Application) : AndroidViewModel(application) {
@@ -81,13 +84,31 @@ class CacheTwisterViewModel(application: Application) : AndroidViewModel(applica
     private val appContext = application.applicationContext
     private val cacheManager = SafeCacheManager(appContext)
     private val prefsRepo = CachePreferencesRepository(appContext)
+    private val selectionStore = CacheSelectionStore(appContext)
+    private var approved = selectionStore.read()
 
     private val _uiState = MutableStateFlow(CacheTwisterUiState())
     val uiState: StateFlow<CacheTwisterUiState> = _uiState.asStateFlow()
 
     private var activeSweepJob: Job? = null
     private var pendingExternalPackage: String? = null
-    private var pendingExternalBeforeBytes: Long = 0L
+    private var pendingExternalBeforeBytes: Long? = null
+    private val externalStatuses = mutableMapOf<String, ExternalCacheStatus>()
+    private val confirmation = ConfirmationGate<VerificationReport>()
+
+    private fun CacheTwisterUiState.selection() = selectedApps.map { it.packageName }.toSet()
+
+    private fun withApproval(entries: List<AppCacheEntry>) = entries.map {
+        it.copy(isSelectedForClean = it.packageName in approved, externalStatus = externalStatuses[it.packageName])
+    }
+
+    private fun invalidateReview() {
+        confirmation.invalidate()
+        if (_uiState.value.phase == CleanPhase.CONFIRM_READY || _uiState.value.phase == CleanPhase.VERIFYING) {
+            activeSweepJob?.cancel()
+            _uiState.update { it.copy(phase = CleanPhase.IDLE, verificationReport = null) }
+        }
+    }
 
     init {
         viewModelScope.launch {
@@ -98,25 +119,16 @@ class CacheTwisterViewModel(application: Application) : AndroidViewModel(applica
         refreshScan()
     }
 
-    fun refreshScan(preserveSelection: Boolean = true) {
+    fun refreshScan() {
+        invalidateReview()
         viewModelScope.launch {
             _uiState.update { it.copy(isScanning = true) }
-            val previousSelection = if (preserveSelection) {
-                _uiState.value.apps.associate { it.packageName to it.isSelectedForClean }
-            } else {
-                emptyMap()
-            }
             val clearedSet = _uiState.value.clearedPackagesThisSession
 
             val (storage, usageGranted, scannedApps) = withContext(Dispatchers.IO) {
                 val storageSummary = cacheManager.getDeviceStorageSummary()
                 val usage = cacheManager.hasUsageStatsPermission()
-                val rawApps = cacheManager.scanAvailableApps(clearedSet)
-                val merged = rawApps.map { entry ->
-                    val prev = previousSelection[entry.packageName]
-                    if (prev != null) entry.copy(isSelectedForClean = prev) else entry
-                }
-                Triple(storageSummary, usage, merged)
+                Triple(storageSummary, usage, cacheManager.scanAvailableApps(clearedSet))
             }
 
             val totalMeasured = scannedApps.filter { it.cacheMeasured }.sumOf { it.cacheBytes }
@@ -130,29 +142,24 @@ class CacheTwisterViewModel(application: Application) : AndroidViewModel(applica
             val fullCount = CacheTwisterWidgetProvider.getActiveWidgetCount(appContext)
 
             _uiState.update { current ->
-                val updatedReport = if (current.phase == CleanPhase.CONFIRM_READY) {
-                    cacheManager.buildVerificationReport(scannedApps)
-                } else {
-                    current.verificationReport
-                }
                 current.copy(
                     isScanning = false,
-                    apps = scannedApps,
+                    apps = withApproval(scannedApps),
                     storageSummary = storage,
                     hasUsageAccess = usageGranted,
                     activeMiniWidgetCount = miniCount,
                     activeFullWidgetCount = fullCount,
-                    verificationReport = updatedReport
                 )
             }
         }
     }
 
     fun onAppResumed() {
+        invalidateReview()
         val checkedPkg = pendingExternalPackage
         val beforeBytes = pendingExternalBeforeBytes
         pendingExternalPackage = null
-        pendingExternalBeforeBytes = 0L
+        pendingExternalBeforeBytes = null
 
         viewModelScope.launch {
             val (storage, usageGranted, scannedApps) = withContext(Dispatchers.IO) {
@@ -163,47 +170,21 @@ class CacheTwisterViewModel(application: Application) : AndroidViewModel(applica
                 )
             }
 
-            val previousSelection = _uiState.value.apps.associate { it.packageName to it.isSelectedForClean }
-            var deltaFreed = 0L
-            var updatedCleared = _uiState.value.clearedPackagesThisSession
             var banner: String? = null
-
             if (checkedPkg != null) {
                 val refreshedEntry = scannedApps.firstOrNull { it.packageName == checkedPkg }
                 if (refreshedEntry != null) {
-                    if (refreshedEntry.cacheMeasured && beforeBytes > refreshedEntry.cacheBytes) {
-                        deltaFreed = beforeBytes - refreshedEntry.cacheBytes
-                        updatedCleared = updatedCleared + checkedPkg
-                        banner = "Verified ${refreshedEntry.appName}: ${formatBytes(deltaFreed)} cleared"
-                    } else if (!refreshedEntry.cacheMeasured) {
-                        updatedCleared = updatedCleared + checkedPkg
-                        banner = "Checked ${refreshedEntry.appName} in Android Storage"
-                    } else if (refreshedEntry.cacheBytes < 16_384L) {
-                        updatedCleared = updatedCleared + checkedPkg
-                        banner = "Verified ${refreshedEntry.appName}: cache is clean"
-                    }
+                    val after = refreshedEntry.cacheBytes.takeIf { refreshedEntry.cacheMeasured }
+                    val status = externalCacheStatus(beforeBytes, after)
+                    externalStatuses[checkedPkg] = status
+                    banner = if (status == ExternalCacheStatus.DECREASED && beforeBytes != null && after != null) {
+                        "${refreshedEntry.appName}: cache decreased by ${formatBytes(beforeBytes - after)}; ${formatBytes(after)} remains"
+                    } else "${refreshedEntry.appName}: ${status.label}"
                 }
             }
-
-            val mergedApps = scannedApps.map { entry ->
-                val prevSel = previousSelection[entry.packageName]
-                entry.copy(
-                    isSelectedForClean = prevSel ?: entry.isSelectedForClean,
-                    isClearedThisSession = updatedCleared.contains(entry.packageName) &&
-                        (!entry.cacheMeasured || entry.cacheBytes < 16_384L)
-                )
-            }
-
+            val mergedApps = withApproval(scannedApps)
             val totalMeasured = mergedApps.filter { it.cacheMeasured }.sumOf { it.cacheBytes }
-            if (deltaFreed > 0L) {
-                prefsRepo.recordVerifiedClean(
-                    bytesFreed = deltaFreed,
-                    verifiedAppsCount = mergedApps.size,
-                    totalDetectedCacheBytes = totalMeasured
-                )
-            } else {
-                prefsRepo.updateDetectedCacheSnapshot(totalMeasured, mergedApps.size)
-            }
+            prefsRepo.updateDetectedCacheSnapshot(totalMeasured, mergedApps.size)
             CacheTwisterWidgetProvider.refreshAllWidgets(appContext)
             MiniTornadoWidgetProvider.refreshAllMiniWidgets(appContext)
             val miniCount = MiniTornadoWidgetProvider.getActiveWidgetCount(appContext)
@@ -217,14 +198,7 @@ class CacheTwisterViewModel(application: Application) : AndroidViewModel(applica
                     hasUsageAccess = usageGranted,
                     activeMiniWidgetCount = miniCount,
                     activeFullWidgetCount = fullCount,
-                    clearedPackagesThisSession = updatedCleared,
-                    sessionFreedBytes = current.sessionFreedBytes + deltaFreed,
-                    statusMessage = banner ?: current.statusMessage,
-                    verificationReport = if (current.phase == CleanPhase.CONFIRM_READY) {
-                        cacheManager.buildVerificationReport(mergedApps)
-                    } else {
-                        current.verificationReport
-                    }
+                    statusMessage = banner ?: current.statusMessage
                 )
             }
         }
@@ -235,23 +209,26 @@ class CacheTwisterViewModel(application: Application) : AndroidViewModel(applica
             _uiState.value.phase == CleanPhase.VERIFYING
         ) return
 
-        activeSweepJob?.cancel()
+        invalidateReview()
+        val reviewedSelection = _uiState.value.selection()
+        if (appContext.packageName !in reviewedSelection) {
+            postStatusMessage("Select Cache Twister to review its own cache cleanup.")
+            return
+        }
         activeSweepJob = viewModelScope.launch {
             _uiState.update {
                 it.copy(
                     phase = CleanPhase.VERIFYING,
-                    currentlySweepingLabel = "Running 4-point safety verification…",
+                    currentlySweepingLabel = "Reading current cache scope…",
                     statusMessage = null
                 )
             }
 
-            val (storage, usageGranted, scannedApps) = withContext(Dispatchers.IO) {
-                val previousSelection = _uiState.value.apps.associate { it.packageName to it.isSelectedForClean }
-                val fresh = cacheManager.scanAvailableApps(_uiState.value.clearedPackagesThisSession).map { entry ->
-                    entry.copy(isSelectedForClean = previousSelection[entry.packageName] ?: entry.isSelectedForClean)
-                }
+            val (storage, usageGranted, rawApps) = withContext(Dispatchers.IO) {
+                val fresh = cacheManager.scanAvailableApps(_uiState.value.clearedPackagesThisSession)
                 Triple(cacheManager.getDeviceStorageSummary(), cacheManager.hasUsageStatsPermission(), fresh)
             }
+            val scannedApps = withApproval(rawApps)
 
             // Brief deliberate verification pause so user observes the safety check sequence
             delay(750L)
@@ -260,6 +237,15 @@ class CacheTwisterViewModel(application: Application) : AndroidViewModel(applica
                 cacheManager.buildVerificationReport(scannedApps)
             }
 
+            if (_uiState.value.phase != CleanPhase.VERIFYING ||
+                _uiState.value.selection() != reviewedSelection ||
+                scannedApps.filter { it.isSelectedForClean }.map { it.packageName }.toSet() != reviewedSelection
+            ) {
+                invalidateReview()
+                postStatusMessage("The app list changed. Review the current selection again.")
+                return@launch
+            }
+            confirmation.arm(report, reviewedSelection)
             _uiState.update {
                 it.copy(
                     isScanning = false,
@@ -268,74 +254,51 @@ class CacheTwisterViewModel(application: Application) : AndroidViewModel(applica
                     hasUsageAccess = usageGranted,
                     verificationReport = report,
                     phase = CleanPhase.CONFIRM_READY,
-                    currentlySweepingLabel = "Safety verified · Ready to sweep"
+                    currentlySweepingLabel = "Review scope before clearing"
                 )
             }
         }
     }
 
-    fun confirmAndStartTornadoClean() {
+    fun confirmAndStartTornadoClean(report: VerificationReport) {
         val current = _uiState.value
-        if (current.phase == CleanPhase.TORNADO_SWEEPING) return
-
-        activeSweepJob?.cancel()
+        if (current.phase != CleanPhase.CONFIRM_READY || current.verificationReport !== report) return
+        if (!confirmation.consume(report, current.selection(), appContext.packageName)) {
+            invalidateReview()
+            return
+        }
+        _uiState.update {
+            it.copy(
+                phase = CleanPhase.TORNADO_SWEEPING, verificationReport = null, sweepProgress = 0.04f,
+                currentlySweepingLabel = "Clearing Cache Twister’s own cache…", statusMessage = null
+            )
+        }
         activeSweepJob = viewModelScope.launch {
-            val targets = current.selectedApps.ifEmpty { current.apps }
-            _uiState.update {
-                it.copy(
-                    phase = CleanPhase.TORNADO_SWEEPING,
-                    sweepProgress = 0.04f,
-                    currentlySweepingLabel = "Spinning up safe vortex…",
-                    statusMessage = null
-                )
-            }
-
             if (current.stats.hapticEnabled) {
                 triggerTornadoHaptic()
             }
 
-            var ownFreedBytes = 0L
-            val totalSteps = 26
+            var result = CacheSweepResult(0, 0, 0)
+            val totalSteps = 20
             for (step in 1..totalSteps) {
-                val progress = step.toFloat() / totalSteps.toFloat()
-                val label = if (targets.isNotEmpty()) {
-                    val idx = ((step - 1) * targets.size / totalSteps).coerceIn(0, targets.lastIndex)
-                    val target = targets[idx]
-                    if (target.isOwnApp) "Sweeping Cache Twister cache…" else "Verifying ${target.appName}…"
-                } else {
-                    "Sweeping local cache…"
+                if (step == 8) {
+                    result = withContext(Dispatchers.IO) { cacheManager.clearOwnAppCacheSafely() }
                 }
-
-                if (step == 12) {
-                    ownFreedBytes = withContext(Dispatchers.IO) {
-                        cacheManager.clearOwnAppCacheSafely()
-                    }
-                }
-
-                _uiState.update {
-                    it.copy(
-                        sweepProgress = progress,
-                        currentlySweepingLabel = label
-                    )
-                }
-                delay(92L)
+                _uiState.update { it.copy(sweepProgress = step.toFloat() / totalSteps) }
+                delay(55L)
             }
-
-            val updatedCleared = _uiState.value.clearedPackagesThisSession + appContext.packageName
+            val ownFreedBytes = result.deletedFileBytes
+            val updatedCleared = if (result.failed == 0 && result.skipped == 0) setOf(appContext.packageName) else emptySet()
             val (postStorage, postApps) = withContext(Dispatchers.IO) {
-                val previousSelection = _uiState.value.apps.associate { it.packageName to it.isSelectedForClean }
-                val fresh = cacheManager.scanAvailableApps(updatedCleared).map { entry ->
-                    entry.copy(isSelectedForClean = previousSelection[entry.packageName] ?: entry.isSelectedForClean)
-                }
+                    val fresh = cacheManager.scanAvailableApps(updatedCleared)
                 Pair(cacheManager.getDeviceStorageSummary(), fresh)
             }
 
             val remainingMeasured = postApps.filter { it.cacheMeasured }.sumOf { it.cacheBytes }
-            prefsRepo.recordVerifiedClean(
-                bytesFreed = ownFreedBytes,
-                verifiedAppsCount = targets.size,
-                totalDetectedCacheBytes = remainingMeasured
-            )
+            if (ownFreedBytes > 0L) {
+                prefsRepo.recordVerifiedClean(ownFreedBytes, 1, remainingMeasured)
+            }
+            prefsRepo.updateDetectedCacheSnapshot(remainingMeasured, postApps.size)
             CacheTwisterWidgetProvider.refreshAllWidgets(appContext)
             MiniTornadoWidgetProvider.refreshAllMiniWidgets(appContext)
 
@@ -343,27 +306,25 @@ class CacheTwisterViewModel(application: Application) : AndroidViewModel(applica
                 triggerCompletionHaptic()
             }
 
-            val otherSelectedCount = postApps.count { it.isSelectedForClean && !it.isOwnApp && !it.isClearedThisSession }
             val resultBanner = buildString {
-                if (ownFreedBytes > 0L) {
-                    append("Swept ${formatBytes(ownFreedBytes)} directly. ")
-                } else {
-                    append("Local cache verified clean. ")
+                append("Twister’s own cache: ${formatBytes(ownFreedBytes)} deleted.")
+                if (result.skipped > 0 || result.failed > 0) {
+                    append(" ${result.skipped} skipped, ${result.failed} failed.")
                 }
-                if (otherSelectedCount > 0) {
-                    append("$otherSelectedCount apps ready for 1-tap Android Storage clean.")
-                }
+                val remainingOwn = postApps.firstOrNull { it.isOwnApp }?.cacheBytes
+                if (remainingOwn != null && remainingOwn > 0L) append(" ${formatBytes(remainingOwn)} remains in Twister.")
+                append(" Other apps were not cleared.")
             }
 
             _uiState.update { state ->
                 state.copy(
                     phase = CleanPhase.COMPLETED,
                     sweepProgress = 1f,
-                    apps = postApps,
+                    apps = withApproval(postApps),
                     storageSummary = postStorage,
                     clearedPackagesThisSession = updatedCleared,
                     sessionFreedBytes = state.sessionFreedBytes + ownFreedBytes,
-                    currentlySweepingLabel = "Tornado sweep verified",
+                    currentlySweepingLabel = "Own-cache sweep finished",
                     statusMessage = resultBanner
                 )
             }
@@ -371,45 +332,44 @@ class CacheTwisterViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun dismissVerification() {
+        confirmation.invalidate()
         if (_uiState.value.phase == CleanPhase.CONFIRM_READY || _uiState.value.phase == CleanPhase.VERIFYING) {
             activeSweepJob?.cancel()
-            _uiState.update { it.copy(phase = CleanPhase.IDLE, currentlySweepingLabel = "") }
+            _uiState.update { it.copy(phase = CleanPhase.IDLE, verificationReport = null, currentlySweepingLabel = "") }
         }
     }
 
     fun resetToIdle() {
+        if (_uiState.value.phase == CleanPhase.TORNADO_SWEEPING) return
+        invalidateReview()
         _uiState.update { it.copy(phase = CleanPhase.IDLE, sweepProgress = 0f, currentlySweepingLabel = "") }
     }
 
     fun toggleAppSelection(packageName: String) {
-        _uiState.update { state ->
-            val updated = state.apps.map { entry ->
-                if (entry.packageName == packageName) {
-                    entry.copy(isSelectedForClean = !entry.isSelectedForClean)
-                } else {
-                    entry
-                }
-            }
-            state.copy(apps = updated)
-        }
+        if (_uiState.value.apps.none { it.packageName == packageName }) return
+        saveSelection(if (packageName in approved) approved - packageName else approved + packageName)
     }
 
     fun setAllAppsSelected(selected: Boolean) {
-        _uiState.update { state ->
-            state.copy(apps = state.apps.map { it.copy(isSelectedForClean = selected || it.isOwnApp) })
-        }
+        saveSelection(if (selected) approved + _uiState.value.apps
+            .filterNot { it.isSystemApp }.map { it.packageName } else emptySet())
+    }
+
+    private fun saveSelection(next: Set<String>) {
+        invalidateReview()
+        approved = next
+        selectionStore.save(next)
+        _uiState.update { it.copy(apps = withApproval(it.apps)) }
     }
 
     fun prepareExternalAppStorageOpen(entry: AppCacheEntry) {
         pendingExternalPackage = entry.packageName
-        pendingExternalBeforeBytes = entry.cacheBytes
+        pendingExternalBeforeBytes = entry.cacheBytes.takeIf { entry.cacheMeasured }
     }
 
-    fun setRequireVerifyBeforeWidgetClean(enabled: Boolean) {
-        viewModelScope.launch {
-            prefsRepo.setRequireVerifyBeforeWidgetClean(enabled)
-            CacheTwisterWidgetProvider.refreshAllWidgets(appContext)
-        }
+    fun cancelExternalAppStorageOpen() {
+        pendingExternalPackage = null
+        pendingExternalBeforeBytes = null
     }
 
     fun setHapticEnabled(enabled: Boolean) {

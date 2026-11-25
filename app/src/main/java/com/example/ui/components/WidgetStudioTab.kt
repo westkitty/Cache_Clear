@@ -63,7 +63,6 @@ fun WidgetStudioTab(
     uiState: CacheTwisterUiState,
     onPinMiniWidgetClick: () -> Unit,
     onPinFullWidgetClick: () -> Unit,
-    onToggleRequireVerify: (Boolean) -> Unit,
     onToggleHaptic: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -183,7 +182,7 @@ fun WidgetStudioTab(
                                         CleanPhase.VERIFYING -> "Verify…"
                                         CleanPhase.TORNADO_SWEEPING -> "${(previewProgress * 100).toInt()}%"
                                         CleanPhase.COMPLETED -> "Clean"
-                                        else -> "Sweep"
+                                        else -> "Open"
                                     },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary,
@@ -202,7 +201,7 @@ fun WidgetStudioTab(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "A compact little tornado button that sits right alongside your app icons. Tap it once on your home screen to verify safety and spin the tornado sweep.",
+                                text = "A compact little tornado button that sits right alongside your app icons. Tap it on your home screen to open the cache queue. It never deletes anything.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -310,7 +309,7 @@ fun WidgetStudioTab(
                                 Text(
                                     text = when (previewPhase) {
                                         CleanPhase.TORNADO_SWEEPING -> "${(previewProgress * 100).toInt()}%"
-                                        CleanPhase.COMPLETED -> "Verified"
+                                        CleanPhase.COMPLETED -> "Finished"
                                         else -> if (uiState.totalMeasuredCacheBytes > 0L) {
                                             formatBytes(uiState.totalMeasuredCacheBytes)
                                         } else {
@@ -335,7 +334,7 @@ fun WidgetStudioTab(
                                 centerSecondaryLabel = when (previewPhase) {
                                     CleanPhase.VERIFYING -> "Safety"
                                     CleanPhase.TORNADO_SWEEPING -> "Sweeping"
-                                    CleanPhase.COMPLETED -> "Verified"
+                                    CleanPhase.COMPLETED -> "Finished"
                                     else -> ""
                                 },
                                 onStageClick = {
@@ -448,38 +447,6 @@ fun WidgetStudioTab(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.Shield,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.secondary
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Pre-Clean Safety Check",
-                                style = MaterialTheme.typography.titleSmall
-                            )
-                            Text(
-                                text = "Verify safe cache scope & sandbox rules before every sweep",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = uiState.stats.requireVerifyBeforeWidgetClean,
-                            onCheckedChange = onToggleRequireVerify,
-                            modifier = Modifier.testTag("toggle_require_verify_switch")
-                        )
-                    }
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
                             imageVector = Icons.Filled.Vibration,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary
@@ -526,7 +493,7 @@ fun WidgetStudioTab(
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            text = "VERIFIED CLEARED",
+                            text = "OWN CACHE DELETED",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -541,7 +508,7 @@ fun WidgetStudioTab(
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         Text(
-                            text = "LAST VERIFIED SWEEP",
+                            text = "LAST OWN-CACHE SWEEP",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
