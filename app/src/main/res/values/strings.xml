@@ -1,0 +1,24 @@
+<resources>
+    <string name="app_name">Cache Twister</string>
+    <string name="widget_description">Resizable 2×2 tornado cache verifier and safe cleaner widget for your home screen</string>
+    <string name="widget_title">Cache Twister (2×2)</string>
+    <string name="mini_widget_title">Mini Tornado (1×1)</string>
+    <string name="mini_widget_description">Compact little 1×1 home screen tornado widget that verifies and sweeps cache on tap</string>
+    <string name="mini_widget_idle_label">Sweep</string>
+    <string name="widget_action_verify_sweep">Verify &amp; Sweep</string>
+    <string name="widget_status_ready">Ready to verify</string>
+    <string name="widget_status_verifying">Verifying safety…</string>
+    <string name="widget_status_sweeping">Tornado sweeping…</string>
+    <string name="widget_status_done">Verified clean</string>
+    <string name="cd_tornado_visual">Animated mini tornado sweeping app cache particles</string>
+    <string name="cd_add_widget">Add Cache Twister widget to home screen</string>
+    <string name="cd_add_mini_widget">Add little 1 by 1 Mini Tornado widget to home screen</string>
+    <string name="cd_refresh_scan">Re-scan installed app caches</string>
+    <string name="cd_open_app_storage">Open Android storage settings for this app</string>
+    <string name="cd_verify_check_passed">Safety check passed</string>
+    <string name="cd_verify_check_action">Action recommended for full visibility</string>
+    <string name="cd_toggle_app_selection">Toggle app in safe clean queue</string>
+    <string name="cd_settings">Widget and safety preferences</string>
+    <string name="cd_storage_donut_chart">Device storage donut chart showing %1$d percent used</string>
+    <string name="cd_top_cache_app_row">Inspect and clear cache for %1$s</string>
+</resources>

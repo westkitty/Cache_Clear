@@ -1,0 +1,6 @@
+{
+  "name": "Cache Twister",
+  "description": "Home screen tornado widget and pre-clean safety verifier for managing app caches on Galaxy S25 and Android devices.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

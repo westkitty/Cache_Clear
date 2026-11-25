@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg_storm"
+    android:gravity="center_horizontal"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <!-- Top header row: verified status pill + live cache metric -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/widget_badge_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/widget_pill_badge_bg"
+            android:paddingStart="7dp"
+            android:paddingTop="2dp"
+            android:paddingEnd="7dp"
+            android:paddingBottom="2dp"
+            android:text="SAFE"
+            android:textColor="#34D399"
+            android:textSize="9sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_metric_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:gravity="end"
+            android:maxLines="1"
+            android:text="Ready"
+            android:textColor="#D8F3FF"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Centerpiece: live dynamically drawn mini-tornado bitmap -->
+    <ImageView
+        android:id="@+id/widget_tornado_image"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="4dp"
+        android:layout_weight="1"
+        android:contentDescription="@string/cd_tornado_visual"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_cache_twister_clean" />
+
+    <!-- Live status subtitle -->
+    <TextView
+        android:id="@+id/widget_status_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:maxLines="1"
+        android:text="@string/widget_status_ready"
+        android:textColor="#93B4D8"
+        android:textSize="10sp" />
+
+    <!-- Primary tornado sweep action pill -->
+    <TextView
+        android:id="@+id/widget_sweep_button"
+        android:layout_width="match_parent"
+        android:layout_height="34dp"
+        android:background="@drawable/widget_btn_sweep_bg"
+        android:gravity="center"
+        android:maxLines="1"
+        android:text="@string/widget_action_verify_sweep"
+        android:textColor="#04121F"
+        android:textSize="11sp"
+        android:textStyle="bold" />
+</LinearLayout>
